@@ -38,6 +38,19 @@ This drives the exact same code with a scripted fake model
 agent loop, same tool-call loop, same sub-agent recursion, same memory
 write and `dream()` call — done in a couple of seconds, no GPU required.
 
+Already have [Ollama](https://ollama.com) running locally instead? Skip the
+Hugging Face download entirely:
+
+```bash
+ollama pull qwen3:4b
+python main_ollama.py
+```
+
+Same diagram, same code — only the model backend
+(`openclaw_mini/ollama_model.py`) differs. It talks to `ollama serve` over
+plain HTTP using nothing but the standard library, so this path needs no
+`pip install` at all.
+
 ## The diagram
 
 <img src="docs/agentic-workflow.png" alt="OpenClaw agentic workflow diagram" width="820" />
@@ -73,7 +86,13 @@ pluggable engines.
 **② Model inference** (`openclaw_mini/model.py`, class `ModelProvider`,
 method `.infer()`). Sends the assembled messages to one small open-weights
 model running locally via Hugging Face `transformers`, greedily and
-synchronously, and gets back plain text.
+synchronously, and gets back plain text. `openclaw_mini/ollama_model.py`'s
+`OllamaModelProvider` is a second backend with the exact same `.infer()`
+shape, for talking to a local `ollama serve` over HTTP instead — see
+`main_ollama.py`. Real OpenClaw's provider layer supports both kinds
+(hosted APIs and local servers like Ollama) side by side
+(`src/llm/providers/`); this demo just picks one per run instead of
+failing over between them.
 
 **Tool calls in reply?** The decision diamond. `.infer()` always returns
 plain text, so `openclaw_mini/tools.py`'s `parse_tool_call()` checks whether
@@ -135,7 +154,8 @@ the loop back into ① Context assembly at the start of the next session.
 
 ```
 openclaw-mini/
-├── main.py                    run everything with a real model
+├── main.py                    run everything with a real model (Hugging Face)
+├── main_ollama.py              run everything against a local `ollama serve`
 ├── sanity_check.py            run everything with a scripted fake model
 ├── requirements.txt
 ├── workspace/                 the agent's workspace — edit these freely
@@ -149,6 +169,7 @@ openclaw-mini/
 │   ├── session.py                Session
 │   ├── context.py                ContextEngine.assemble()      — ① 
 │   ├── model.py                  ModelProvider.infer()          — ②
+│   ├── ollama_model.py           OllamaModelProvider.infer()    — ② (Ollama backend)
 │   ├── mock_model.py             MockModelProvider (for sanity_check.py)
 │   ├── tools.py                  tool registry, sessions_spawn — ③
 │   ├── agent_loop.py             AgentLoop.run()                — ④ + the loop itself
@@ -166,6 +187,10 @@ download; `Qwen/Qwen2.5-3B-Instruct` or bigger will follow the "reply with
 JSON to call a tool" instruction more reliably than the 1.5B default. Any
 instruction-tuned causal LM that `transformers` can load will work — the
 rest of the code doesn't know or care which one it's talking to.
+
+Same idea on the Ollama backend: change `DEFAULT_OLLAMA_MODEL` in
+`openclaw_mini/ollama_model.py`, or just pass any tag you've already
+pulled straight in — `OllamaModelProvider(model_name="llama3.2:3b")`.
 
 **Add a tool.** Write a function `def my_tool(arguments: dict, ctx: ToolContext) -> str`
 in `tools.py`, add it to the `TOOLS` dict and a line to `TOOL_DESCRIPTIONS`.
