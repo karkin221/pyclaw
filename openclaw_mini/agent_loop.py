@@ -8,7 +8,9 @@ streaming, plugin hooks, and auto-compaction.
 from .context import ContextEngine
 from .tools import ToolContext, parse_tool_call, run_tool
 
-MAX_TOOL_HOPS = 4  # safety valve against an infinite tool-call loop, not a tuning knob
+MAX_TOOL_HOPS = 4  # safety valve against an infinite tool-call loop — the
+# default every demo here uses. Override via max_tool_hops= (AgentLoop or
+# Gateway) for tasks that legitimately need more hops; see run_task.py.
 NO_REPLY = "NO_REPLY"  # same silent-token convention real OpenClaw uses
 
 
@@ -20,18 +22,21 @@ def stage(label: str, detail: str = "") -> None:
 
 
 class AgentLoop:
-    def __init__(self, session, workspace, model, gateway, depth: int = 0):
+    def __init__(
+        self, session, workspace, model, gateway, depth: int = 0, max_tool_hops: int = MAX_TOOL_HOPS
+    ):
         self.session = session
         self.workspace = workspace
         self.model = model
         self.gateway = gateway
         self.depth = depth
+        self.max_tool_hops = max_tool_hops
         self.context_engine = ContextEngine()
 
     def run(self, user_text: str) -> str:
         self.session.history.append({"role": "user", "content": user_text})
 
-        for _hop in range(MAX_TOOL_HOPS):
+        for _hop in range(self.max_tool_hops):
             stage("① Context assembly")
             messages = self.context_engine.assemble(self.session, self.workspace)
 
@@ -61,4 +66,4 @@ class AgentLoop:
             )
 
         stage("④ Reply shaping (tool-hop limit reached)")
-        return "I couldn't finish that within this demo's tool-call limit."
+        return f"I couldn't finish that within this demo's tool-call limit ({self.max_tool_hops} hops)."

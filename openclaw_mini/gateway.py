@@ -11,20 +11,27 @@ from .session import Session
 
 
 class Gateway:
-    def __init__(self, workspace, model):
+    def __init__(self, workspace, model, max_tool_hops: int | None = None):
         self.workspace = workspace
         self.model = model
         self.sessions: dict[str, Session] = {}
         self._subagent_counter = 0
+        # None means "let AgentLoop use its own default" (see agent_loop.py).
+        # Set this to raise the ceiling for every call this Gateway makes —
+        # e.g. an open-ended task script like run_task.py.
+        self.max_tool_hops = max_tool_hops
 
     def handle_message(self, session_key: str, text: str, depth: int = 0) -> str:
         """Every entry surface on the diagram (chat channels, CLI, Web
         Control UI, mobile nodes, automation) collapses to a call to this
         one method in this demo — see main.py."""
         session = self.sessions.setdefault(session_key, Session(session_key))
-        loop = AgentLoop(
+        loop_kwargs = dict(
             session=session, workspace=self.workspace, model=self.model, gateway=self, depth=depth
         )
+        if self.max_tool_hops is not None:
+            loop_kwargs["max_tool_hops"] = self.max_tool_hops
+        loop = AgentLoop(**loop_kwargs)
         return loop.run(text)
 
     def next_subagent_key(self) -> str:

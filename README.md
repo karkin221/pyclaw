@@ -51,6 +51,19 @@ Same diagram, same code — only the model backend
 plain HTTP using nothing but the standard library, so this path needs no
 `pip install` at all.
 
+Want to see the loop work an actual task instead of the scripted demo
+turns above? `run_task.py` sends one open-ended prompt through the same
+Gateway/AgentLoop/tools/memory code, with a much higher tool-call ceiling
+than the demos use (see [What's real vs. simplified](#whats-real-vs-simplified)):
+
+```bash
+python run_task.py                       # runs a built-in example task
+python run_task.py "your own task here"
+```
+
+It prints the same stage-by-stage trace, then lists whatever files the
+model saved to `workspace/` with `write_file`.
+
 ## The diagram
 
 <img src="docs/agentic-workflow.png" alt="OpenClaw agentic workflow diagram" width="820" />
@@ -156,6 +169,7 @@ the loop back into ① Context assembly at the start of the next session.
 openclaw-mini/
 ├── main.py                    run everything with a real model (Hugging Face)
 ├── main_ollama.py              run everything against a local `ollama serve`
+├── run_task.py                  give the loop one open-ended task (Ollama)
 ├── sanity_check.py            run everything with a scripted fake model
 ├── requirements.txt
 ├── workspace/                 the agent's workspace — edit these freely
