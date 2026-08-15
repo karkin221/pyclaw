@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# runtime-generated — episodic notes and whatever dream() writes back
+workspace/memory/*.md
