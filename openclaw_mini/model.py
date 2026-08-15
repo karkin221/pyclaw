@@ -26,10 +26,32 @@ class ModelTurn:
     """One raw turn out of the model, before the agent loop decides whether
     it's a tool call or a reply. Real OpenClaw's provider layer returns a
     richer structured turn (text + native tool_use blocks + usage); this is
-    the minimal version — just the text — since tool calls here are parsed
-    out of plain text (see openclaw_mini.tools.parse_tool_call)."""
+    the minimal version — text plus, when the provider reports them,
+    reasoning/thinking and token counts — since tool calls here are parsed
+    out of plain text (see openclaw_mini.tools.parse_tool_calls).
+
+    thinking/input_tokens/output_tokens are all optional and default to
+    None: MockModelProvider never sets them, ModelProvider (below) always
+    can, and OllamaModelProvider can when the server reports them."""
 
     text: str
+    thinking: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+def split_thinking(text: str) -> tuple[str, str | None]:
+    """Split a raw completion into (answer, thinking) when it contains a
+    hybrid-thinking reasoning block (Qwen3 and others). The real answer is
+    everything after the LAST </think> — some providers prime the opening
+    <think> tag into the prompt template rather than generating it, so only
+    the closing tag may actually show up in the text — and this returns
+    (text, None) unchanged when there's no thinking block at all."""
+    if "</think>" not in text:
+        return text.strip(), None
+    thinking, _, answer = text.rpartition("</think>")
+    thinking = thinking.removeprefix("<think>").strip()
+    return answer.strip(), (thinking or None)
 
 
 class ModelProvider:
@@ -69,5 +91,11 @@ class ModelProvider:
             )
 
         generated = output_ids[0][inputs["input_ids"].shape[1]:]
-        text = self.tokenizer.decode(generated, skip_special_tokens=True)
-        return ModelTurn(text=text.strip())
+        raw_text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        text, thinking = split_thinking(raw_text)
+        return ModelTurn(
+            text=text,
+            thinking=thinking,
+            input_tokens=int(inputs["input_ids"].shape[1]),
+            output_tokens=int(generated.shape[0]),
+        )

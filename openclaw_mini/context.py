@@ -29,8 +29,11 @@ SYSTEM_TEMPLATE = """\
 You can use these tools when they help:
 {tools}
 
-To call a tool, reply with EXACTLY one line of JSON and nothing else:
+To call one tool, reply with EXACTLY one line of JSON and nothing else:
 {{"tool": "<name>", "arguments": {{...}}}}
+To call more than one tool at once, reply with a JSON array of that same
+shape instead:
+[{{"tool": "<name>", "arguments": {{...}}}}, {{"tool": "<name>", "arguments": {{...}}}}]
 Otherwise just answer normally in plain text — short and direct.
 """
 

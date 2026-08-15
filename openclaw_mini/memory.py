@@ -9,6 +9,7 @@ this demo leaves out, since a single-user demo has nothing untrusted to
 filter. What's left is the part underneath the gate: read what happened,
 ask the model to fold it into the curated file, save the result.
 """
+from .trace import stage, trace_block, trace_tokens
 
 DREAM_SYSTEM_PROMPT = """\
 You maintain one short long-term memory file for a personal assistant.
@@ -24,6 +25,7 @@ def dream(workspace, model) -> str:
     if not notes.strip():
         return "(nothing new to consolidate)"
 
+    stage("💭 Dreaming — memory consolidation")
     existing = workspace.read_bootstrap_file("MEMORY.md") or "(empty)"
     user_prompt = f"# Current MEMORY.md\n{existing}\n\n# New daily notes\n{notes}"
 
@@ -33,5 +35,8 @@ def dream(workspace, model) -> str:
             {"role": "user", "content": user_prompt},
         ]
     )
+    trace_tokens(turn)
+    if turn.thinking:
+        trace_block("thinking", turn.thinking)
     workspace.write_memory_core(turn.text)
     return turn.text

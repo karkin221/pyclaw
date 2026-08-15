@@ -70,9 +70,10 @@ model saved to `workspace/` with `write_file`.
 
 Open `docs/agentic-workflow.html` in a browser for the interactive version
 (light/dark toggle). This code follows that diagram box for box; the
-circled numbers on the diagram (①②③④) show up as `stage()` print
-statements in `openclaw_mini/agent_loop.py`, so running `python main.py`
-prints each stage as it fires.
+circled numbers on the diagram (①②③④) show up as `stage()` calls from
+`openclaw_mini/trace.py`, so running `python main.py` prints each stage as
+it fires — along with everything that happened inside it (see
+[Tracing](#tracing) below).
 
 ## How it works
 
@@ -105,19 +106,32 @@ shape, for talking to a local `ollama serve` over HTTP instead — see
 `main_ollama.py`. Real OpenClaw's provider layer supports both kinds
 (hosted APIs and local servers like Ollama) side by side
 (`src/llm/providers/`); this demo just picks one per run instead of
-failing over between them.
+failing over between them. Each `ModelTurn` a provider returns can also
+carry token counts and a reasoning/thinking trace when the model produced
+one (Qwen3 and other hybrid-thinking models) — MockModelProvider is the
+one provider that never sets these, since it isn't a real model. See
+[Tracing](#tracing).
 
 **Tool calls in reply?** The decision diamond. `.infer()` always returns
-plain text, so `openclaw_mini/tools.py`'s `parse_tool_call()` checks whether
-that text is a one-line JSON tool call (the format the system prompt asks
-for) or an ordinary reply.
+plain text, so `openclaw_mini/tools.py`'s `parse_tool_calls()` checks
+whether that text is a JSON tool call — one object, or a JSON array for
+more than one at once — the format the system prompt asks for, or an
+ordinary reply.
 
 **③ Tool execution** (`openclaw_mini/tools.py`, function `run_tool()`,
-registry `TOOLS`). If it's a tool call, the matching Python function runs
-directly — no policy check, no sandbox, no before/after hooks — and its
-result is fed back into the conversation. The loop then goes straight back
-to ① Context assembly for another model turn, exactly like the arrow on the
-diagram. `MAX_TOOL_HOPS` in `agent_loop.py` just stops it from looping
+registry `TOOLS`). A single model turn can request one tool call or
+several at once — `parse_tool_calls()` accepts either a single
+`{"tool": ..., "arguments": {...}}` object or a JSON array of them,
+mirroring how real OpenClaw's runner collects however many `tool_use`
+blocks (`clientToolCalls`/`pendingToolCalls`) came back in one turn,
+including OpenAI's `parallel_tool_calls` (on by default there). Each call
+in the batch runs its matching Python function directly — no policy check,
+no sandbox, no before/after hooks — in the order the model listed them,
+and all their results feed back into the conversation as one turn. The
+loop then goes straight back to ① Context assembly for another model
+turn, exactly like the arrow on the diagram. `MAX_TOOL_HOPS` in
+`agent_loop.py` bounds model round-trips, not individual tool calls —
+one round-trip can now carry several — and just stops it from looping
 forever; it isn't a tuning knob.
 
 **Sub-agent delegation** (the `sessions_spawn` tool, same name as the real
@@ -150,6 +164,36 @@ reads every daily note, asks the model to fold anything durable into the
 existing `MEMORY.md`, and overwrites the file. The next `assemble()` call
 picks up the new content automatically — that's the feedback arrow closing
 the loop back into ① Context assembly at the start of the next session.
+
+## Tracing
+
+Every stage narrates what it's doing as it runs
+(`openclaw_mini/trace.py`, functions `stage()`/`trace()`/`trace_block()`/
+`trace_tokens()`) — which box is active, the model's input/output token
+counts, its full reasoning/thinking trace when it produced one, and every
+tool call's arguments and result, for example:
+
+```
+    · ② Model inference
+      ↳ tokens: input=812 output=341
+      ↳ thinking:
+        | Okay, let's see. The user wants...
+    · ③ Tool execution — calculator
+      ↳ arguments:
+        | {
+        |   "expression": "482 * 17 - 96"
+        | }
+      ↳ result:
+        | 8098
+```
+
+This is unfiltered on purpose, so a run is fully traceable step by step —
+expect it to be verbose, especially with thinking models. `memory.dream()`
+narrates the same way, since it's a model call too, just not one triggered
+by an incoming message. `openclaw_mini.mock_model.MockModelProvider` never
+sets token counts or a thinking trace on the `ModelTurn`s it returns, so
+`sanity_check.py`'s output only ever shows the stage markers, not the
+`↳` detail lines.
 
 ## What's real vs. simplified
 
@@ -187,7 +231,8 @@ openclaw-mini/
 │   ├── mock_model.py             MockModelProvider (for sanity_check.py)
 │   ├── tools.py                  tool registry, sessions_spawn — ③
 │   ├── agent_loop.py             AgentLoop.run()                — ④ + the loop itself
-│   └── memory.py                 dream()
+│   ├── memory.py                 dream()
+│   └── trace.py                  stage()/trace() console narration
 └── docs/
     ├── agentic-workflow.png       the diagram, static
     └── agentic-workflow.html      the diagram, interactive

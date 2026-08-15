@@ -133,23 +133,36 @@ TOOL_DESCRIPTIONS = """\
 - sessions_spawn(task) — delegate a task to a fresh sub-agent and get its answer back"""
 
 
-def parse_tool_call(text: str) -> ToolCall | None:
-    """The "Tool calls in reply?" decision diamond. Real OpenClaw gets a
-    structured tool_use block straight from the provider's API. This demo's
-    system prompt (see context.py) instead asks the model to reply with one
-    line of JSON when it wants a tool, so parsing is just: does this look
-    like {"tool": ..., "arguments": {...}}?
+def parse_tool_calls(text: str) -> list[ToolCall]:
+    """The "Tool calls in reply?" decision diamond. Real OpenClaw's runner
+    collects however many tool_use blocks came back on one turn
+    (`clientToolCalls`/`pendingToolCalls` in embedded-agent-runner/types.ts
+    — "the array always has at least one entry" — and OpenAI's
+    `parallel_tool_calls`, on by default there). This demo's system prompt
+    (see context.py) mirrors that with plain JSON instead of native
+    tool_use blocks: either one object, {"tool": ..., "arguments": {...}},
+    or a JSON array of them for more than one call in the same turn.
+
+    Returns an empty list for anything that isn't one of those two shapes
+    — including a malformed array, where one bad entry rejects the whole
+    batch, the same all-or-nothing rule a single malformed object already
+    got — which agent_loop.py treats as "not a tool call, it's the final
+    reply."
     """
     stripped = text.strip()
-    if not stripped.startswith("{"):
-        return None
+    if not stripped.startswith("{") and not stripped.startswith("["):
+        return []
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict) or "tool" not in data:
-        return None
-    return ToolCall(name=data["tool"], arguments=data.get("arguments") or {})
+        return []
+    items = data if isinstance(data, list) else [data]
+    calls: list[ToolCall] = []
+    for item in items:
+        if not isinstance(item, dict) or "tool" not in item:
+            return []
+        calls.append(ToolCall(name=item["tool"], arguments=item.get("arguments") or {}))
+    return calls
 
 
 def run_tool(call: ToolCall, ctx: ToolContext) -> str:

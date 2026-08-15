@@ -17,7 +17,7 @@ import json
 import urllib.error
 import urllib.request
 
-from .model import ModelTurn
+from .model import ModelTurn, split_thinking
 
 # Mirrors model.py's DEFAULT_MODEL choice — small, instruction-tuned, and
 # reasonable at following this demo's "reply with JSON to call a tool"
@@ -69,7 +69,7 @@ class OllamaModelProvider:
                 # Hybrid-thinking models (Qwen3 and others) default to emitting
                 # a <think>...</think> reasoning block before the answer. That
                 # both slows generation a lot and would break
-                # tools.parse_tool_call's plain "does this start with {"
+                # tools.parse_tool_calls's plain "does this start with { or ["
                 # check, so it's turned off explicitly. Ollama ignores this
                 # option on models that don't support it.
                 "think": False,
@@ -98,17 +98,29 @@ class OllamaModelProvider:
                 f"keeps happening, e.g. OllamaModelProvider(timeout=600)."
             ) from exc
         text = body.get("message", {}).get("content", "")
+        # Some Ollama versions separate reasoning into a dedicated
+        # "thinking" field on the message when they do honor think: above;
+        # prefer that when it's present.
+        thinking = body.get("message", {}).get("thinking") or None
+
         # Belt and suspenders on top of think: false above: some Ollama
         # versions don't yet support that option and silently ignore it, so
-        # a hybrid-thinking model can still hand back a full reasoning trace
-        # here. When that happens the opening <think> tag is often primed
-        # into the prompt template rather than generated, so only the
-        # closing tag shows up in `content` — meaning the real answer is
-        # everything after the LAST </think>, whether or not an opening tag
-        # is present. Without this, a stray reasoning trace gets mistaken
-        # for the final reply, or hides a tool-call JSON line from
-        # tools.parse_tool_call, or (worse) ends up saved verbatim into
-        # MEMORY.md by memory.dream().
-        if "</think>" in text:
-            text = text.rsplit("</think>", 1)[-1]
-        return ModelTurn(text=text.strip())
+        # a hybrid-thinking model can still hand the whole reasoning trace
+        # back inside `content` instead. When that happens the opening
+        # <think> tag is often primed into the prompt template rather than
+        # generated, so only the closing tag shows up here — split_thinking
+        # handles both cases. Without this, a stray reasoning trace gets
+        # mistaken for the final reply, or hides a tool-call JSON line from
+        # tools.parse_tool_calls, or (worse) ends up saved verbatim into
+        # MEMORY.md by memory.dream(). It's captured rather than discarded
+        # so it can still be traced — see trace.trace_block, used from
+        # agent_loop.py and memory.py.
+        text, extracted_thinking = split_thinking(text)
+        thinking = thinking or extracted_thinking
+
+        return ModelTurn(
+            text=text,
+            thinking=thinking,
+            input_tokens=body.get("prompt_eval_count"),
+            output_tokens=body.get("eval_count"),
+        )
