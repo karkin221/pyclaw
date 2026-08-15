@@ -98,4 +98,17 @@ class OllamaModelProvider:
                 f"keeps happening, e.g. OllamaModelProvider(timeout=600)."
             ) from exc
         text = body.get("message", {}).get("content", "")
+        # Belt and suspenders on top of think: false above: some Ollama
+        # versions don't yet support that option and silently ignore it, so
+        # a hybrid-thinking model can still hand back a full reasoning trace
+        # here. When that happens the opening <think> tag is often primed
+        # into the prompt template rather than generated, so only the
+        # closing tag shows up in `content` — meaning the real answer is
+        # everything after the LAST </think>, whether or not an opening tag
+        # is present. Without this, a stray reasoning trace gets mistaken
+        # for the final reply, or hides a tool-call JSON line from
+        # tools.parse_tool_call, or (worse) ends up saved verbatim into
+        # MEMORY.md by memory.dream().
+        if "</think>" in text:
+            text = text.rsplit("</think>", 1)[-1]
         return ModelTurn(text=text.strip())
