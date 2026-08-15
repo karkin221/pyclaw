@@ -43,7 +43,7 @@ class OllamaModelProvider:
         self,
         model_name: str = DEFAULT_OLLAMA_MODEL,
         host: str = DEFAULT_HOST,
-        timeout: float = 120.0,
+        timeout: float = 300.0,
     ):
         self.model_name = model_name
         self.host = host.rstrip("/")
@@ -54,7 +54,7 @@ class OllamaModelProvider:
         try:
             with urllib.request.urlopen(f"{self.host}/api/tags", timeout=5):
                 pass
-        except urllib.error.URLError as exc:
+        except (urllib.error.URLError, TimeoutError) as exc:
             raise ConnectionError(
                 f"can't reach an Ollama server at {self.host} — is `ollama serve` "
                 f"running there? ({exc})"
@@ -62,7 +62,18 @@ class OllamaModelProvider:
 
     def infer(self, messages: list[dict]) -> ModelTurn:
         payload = json.dumps(
-            {"model": self.model_name, "messages": messages, "stream": False}
+            {
+                "model": self.model_name,
+                "messages": messages,
+                "stream": False,
+                # Hybrid-thinking models (Qwen3 and others) default to emitting
+                # a <think>...</think> reasoning block before the answer. That
+                # both slows generation a lot and would break
+                # tools.parse_tool_call's plain "does this start with {"
+                # check, so it's turned off explicitly. Ollama ignores this
+                # option on models that don't support it.
+                "think": False,
+            }
         ).encode()
         request = urllib.request.Request(
             f"{self.host}/api/chat",
@@ -78,6 +89,13 @@ class OllamaModelProvider:
             raise RuntimeError(
                 f"Ollama returned HTTP {exc.code} for model {self.model_name!r} — "
                 f"pulled yet? Try `ollama pull {self.model_name}`. Detail: {detail}"
+            ) from exc
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"Ollama took longer than {self.timeout:.0f}s to reply for model "
+                f"{self.model_name!r} — small models can be slow on CPU-only "
+                f"hardware. Pass a bigger timeout= to OllamaModelProvider if this "
+                f"keeps happening, e.g. OllamaModelProvider(timeout=600)."
             ) from exc
         text = body.get("message", {}).get("content", "")
         return ModelTurn(text=text.strip())
